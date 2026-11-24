@@ -2,7 +2,7 @@ name: mailbot
 
 on:
   schedule:
-    - cron: "*/15 * * * *"   # каждые 15 минут (GitHub может запускать с задержкой)
+    - cron: "*/5 * * * *"   # каждые 15 минут (GitHub может запускать с задержкой)
   workflow_dispatch: {}       # ручной запуск кнопкой
 
 permissions:
