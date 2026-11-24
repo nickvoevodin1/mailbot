@@ -1,0 +1,67 @@
+name: mailbot
+
+on:
+  schedule:
+    - cron: "*/15 * * * *"   # каждые 15 минут (GitHub может запускать с задержкой)
+  workflow_dispatch: {}       # ручной запуск кнопкой
+
+permissions:
+  contents: read
+  actions: write              # нужно шагу «не дать расписанию отключиться»
+
+concurrency:
+  group: mailbot
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MAIL_USER: ${{ secrets.MAIL_USER }}
+      MAIL_APP_PASSWORD: ${{ secrets.MAIL_APP_PASSWORD }}
+      ALLOWED_SENDER: ${{ secrets.ALLOWED_SENDER }}
+      GIGACHAT_AUTH_KEY: ${{ secrets.GIGACHAT_AUTH_KEY }}
+      HEALTHCHECK_URL: ${{ secrets.HEALTHCHECK_URL }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Установить библиотеки
+        run: pip install requests python-docx
+
+      # Быстрая проверка: есть ли новые письма и просят ли документ.
+      # Если писем нет, остальные шаги пропускаются, и запуск занимает секунды.
+      - name: Проверить почту
+        id: peek
+        run: python bot.py --peek
+
+      - name: Сертификаты Минцифры (нужны для GigaChat)
+        if: steps.peek.outputs.pending != '0'
+        run: |
+          curl -fsSL https://gu-st.ru/content/lending/russian_trusted_root_ca_pem.crt -o root.crt
+          curl -fsSL https://gu-st.ru/content/lending/russian_trusted_sub_ca_pem.crt -o sub.crt
+          cat "$(python -m certifi)" root.crt sub.crt > ca.pem
+          echo "CA_BUNDLE=$PWD/ca.pem" >> "$GITHUB_ENV"
+
+      - name: Установить LibreOffice (только если просят документ)
+        if: steps.peek.outputs.doc == '1'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libreoffice-writer
+
+      - name: Ответить на письма
+        if: steps.peek.outputs.pending != '0'
+        run: python bot.py
+
+      # Публичные репозитории отключают расписание после 60 дней без активности.
+      # Этот шаг пытается этого не допустить; если не поможет, раз в пару месяцев
+      # просто сделайте любое небольшое изменение в репозитории.
+      - name: Не давать расписанию отключиться
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/mailbot.yml/enable"
